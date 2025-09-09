@@ -75,11 +75,17 @@ const updateUser = (req, res) => {
   });
 };
 
+const myRout = (req, res) => {
+  // console.log(req.headers);
+  res.status(200).json({ message: "Successfull cos gaeidan" });
+};
+
 const controller = {
   logUserIn,
   logUserOut,
   sendUserInfo,
   updateUser,
+  myRout,
 };
 
 module.exports = controller;
