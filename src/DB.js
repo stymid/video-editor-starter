@@ -7,7 +7,6 @@ const sessionsPath = "./data/sessions";
 class DB {
   constructor() {
     this.videos = JSON.parse(fs.readFileSync(videoPath, "utf8"));
-    console.log(this.videos);
 
     /*
      A sample object in this users array would look like:
