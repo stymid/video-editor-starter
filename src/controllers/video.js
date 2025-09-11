@@ -88,7 +88,6 @@ const getVideoAsset = async (req, res, handleErr) => {
   db.update();
 
   const video = db.videos.find((video) => video.videoId === videoId);
-  console.log(video);
 
   if (!video) {
     return handleErr({
@@ -102,57 +101,145 @@ const getVideoAsset = async (req, res, handleErr) => {
   let mimeType;
   let fileName; //The final file name for the download (including th extension)
 
-  switch (type) {
-    case "thumbnail":
-      fileHandler = await fsp.open(`${folder}/thumbnail.jpg`);
-      console.log(type, 107);
-      mimeType = "image/jpeg";
-      break;
-    // audio
-    // resize
-    case "resize":
-      const dimantion = req.params.get("dimentions"); // dimantion format exe: 1290x720
-      fileHandler = await fsp.open(`${folder}/${dimantion}.${video.extension}`);
-      mimeType = `video/${video.extension}`;
-      fileName = `${video.name}-${dimantion}.${video.extension}`;
-      break;
-    case "audio":
-      fileHandler = await fsp.open(`${folder}/audio.acc`);
-      mimeType = `audio/aac`;
-      fileName = `${video.name}-audio.acc`;
-      break;
-    case "original":
-      fileHandler = await fsp.open(`${folder}/original.${video.extension}`);
-      mimeType = `video/${video.extension}`;
-      fileName = `${video.name}.${video.extension}`;
-      break;
+  try {
+    switch (type) {
+      case "thumbnail":
+        fileHandler = await fsp.open(`${folder}/thumbnail.jpg`);
+        mimeType = "image/jpeg";
+        break;
+      // audio
+      // resize
+      case "resize":
+        const dimantion = req.params.get("dimensions"); // dimantion format exe: 1290x720
+
+        fileHandler = await fsp.open(
+          `${folder}/${dimantion}.${video.extension}`
+        );
+        mimeType = `video/${video.extension}`;
+        fileName = `${video.name}-${dimantion}.${video.extension}`;
+        break;
+      case "audio":
+        fileHandler = await fsp.open(`${folder}/audio.aac`);
+        mimeType = `audio/aac`;
+        fileName = `${video.name}-audio.aac`;
+        break;
+      case "original":
+        fileHandler = await fsp.open(`${folder}/original.${video.extension}`);
+        mimeType = `video/${video.extension}`;
+        fileName = `${video.name}.${video.extension}`;
+        break;
+    }
+
+    // Grab the file size
+    const stat = await fileHandler.stat();
+
+    const fileStream = fileHandler.createReadStream();
+
+    // Set the header to prompt for download
+    if (type !== "thumbnail") {
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"	`
+      );
+    }
+
+    // Set the Content-Type header based on the file type
+    res.setHeader("Content-Type", mimeType);
+    // Set the Content-Length header based on the file type
+    res.setHeader("Content-Length", stat.size);
+
+    res.status(200);
+    await pipeline(fileStream, res);
+
+    fileHandler.close(); // this is extreamly important. leads to memory issuse
+  } catch (err) {
+    console.log(err);
+  }
+};
+
+// Extract the audio for a video file (can only be done once per video)
+const extractAudio = async (req, res, handleErr) => {
+  const videoId = req.params.get("videoId");
+  db.update();
+
+  const video = db.videos.find((video) => video.videoId === videoId);
+
+  if (!video) {
+    return handleErr({
+      status: 404,
+      message: "Video not found",
+    });
   }
 
-  // Grab the file size
-  const stat = await fileHandler.stat();
+  const folder = path.join(process.cwd(), "storage", videoId);
+  const isAudioExist = video.extractedAudio;
 
-  const fileStream = fileHandler.createReadStream();
-
-  // Set the header to prompt for download
-  if (type !== "thumbnail") {
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"	`);
+  if (isAudioExist) {
+    return handleErr({
+      staus: 400,
+      message: "The audio has already been extracted for this video.",
+    });
   }
+  const targetAudioPath = path.join(folder, "audio.aac");
+  const originalVideoPath = `${folder}/original.${video.extension}`;
+  try {
+    await FF.extractAudio(originalVideoPath, targetAudioPath);
+    video.extractedAudio = true;
+    db.save();
 
-  // Set the Content-Type header based on the file type
-  res.setHeader("Content-Type", mimeType);
-  // Set the Content-Length header based on the file type
-  res.setHeader("Content-Length", stat.size);
+    res.status(200).json({
+      status: "success",
+      message: "The audio was extracted successfully.",
+    });
+  } catch (err) {
+    util.deleteFile(targetAudioPath);
+    return handleErr(err);
+  }
+};
 
-  res.status(200);
-  await pipeline(fileStream, res);
+const resizeVideo = async (req, res, handleErr) => {
+  const videoId = req.body.videoId;
+  const width = req.body.width;
+  const height = req.body.height;
+  db.update();
 
-  fileHandler.close(); // this is extreamly important. leads to memory issuse
+  const video = db.videos.find((video) => videoId === video.videoId);
+
+  if (!video) {
+    return handleErr({
+      status: 404,
+      message: "Video not found",
+    });
+  }
+  const folder = path.join(process.cwd(), "storage", videoId);
+  const originalVideoPath = path.join(folder, `original.${video.extension}`);
+  const targetVideoPath = path.join(
+    folder,
+    `${width}x${height}.${video.extension}`
+  );
+  try {
+    video.resizes[`${width}x${height}`] = { processing: true };
+    await FF.resizeVideo(originalVideoPath, targetVideoPath, width, height);
+
+    video.resizes[`${width}x${height}`].processing = false;
+    db.save();
+    res.status(200).json({
+      message: "The video is now being proccessed!",
+      status: "success",
+    });
+  } catch (err) {
+    util.deleteFile(targetAudioPath);
+    video.resizes[`${width}x${height}`].processing = false;
+    return handleErr(err);
+  }
 };
 
 const controller = {
   getVideos,
   uploadVideo,
   getVideoAsset,
+  extractAudio,
+  resizeVideo,
 };
 
 module.exports = controller;
