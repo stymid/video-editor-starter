@@ -5,8 +5,9 @@ const fs = require("node:fs");
 const { pipeline } = require("node:stream/promises");
 const util = require("../../lib/util");
 const db = require("../DB");
-const { spawn } = require("node:child_process");
 const FF = require("../../lib/ff");
+const JobQueue = require("../../lib/JobQueue");
+const jobs = new JobQueue();
 
 const ALLOWED_EXTS = new Set(["mp4", "mov", "mkv", "webm"]);
 
@@ -49,7 +50,6 @@ const uploadVideo = async (req, res, handleErr) => {
 
     const dimensions = await FF.getDimensions(dest, thumbnailPath);
 
-    db.update();
     db.videos.unshift({
       id: db.videos.length,
       videoId,
@@ -204,34 +204,26 @@ const resizeVideo = async (req, res, handleErr) => {
   db.update();
 
   const video = db.videos.find((video) => videoId === video.videoId);
-
   if (!video) {
     return handleErr({
       status: 404,
       message: "Video not found",
     });
   }
-  const folder = path.join(process.cwd(), "storage", videoId);
-  const originalVideoPath = path.join(folder, `original.${video.extension}`);
-  const targetVideoPath = path.join(
-    folder,
-    `${width}x${height}.${video.extension}`
-  );
-  try {
-    video.resizes[`${width}x${height}`] = { processing: true };
-    await FF.resizeVideo(originalVideoPath, targetVideoPath, width, height);
 
-    video.resizes[`${width}x${height}`].processing = false;
-    db.save();
-    res.status(200).json({
-      message: "The video is now being proccessed!",
-      status: "success",
-    });
-  } catch (err) {
-    util.deleteFile(targetAudioPath);
-    video.resizes[`${width}x${height}`].processing = false;
-    return handleErr(err);
-  }
+  db.update();
+
+  jobs.enqueue({
+    type: "resize",
+    videoId,
+    width,
+    height,
+  });
+
+  res.status(200).json({
+    message: "The video is now being proccessed!",
+    status: "success",
+  });
 };
 
 const controller = {
