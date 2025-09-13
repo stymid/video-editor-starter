@@ -4,10 +4,15 @@ const fsp = require("node:fs/promises");
 const fs = require("node:fs");
 const { pipeline } = require("node:stream/promises");
 const util = require("../../lib/util");
+const cluster = require("node:cluster");
 const db = require("../DB");
 const FF = require("../../lib/ff");
 const JobQueue = require("../../lib/JobQueue");
-const jobs = new JobQueue();
+
+let jobs;
+if (cluster.isPrimary) {
+  jobs = new JobQueue();
+}
 
 const ALLOWED_EXTS = new Set(["mp4", "mov", "mkv", "webm"]);
 
@@ -211,14 +216,23 @@ const resizeVideo = async (req, res, handleErr) => {
     });
   }
 
-  db.update();
-
-  jobs.enqueue({
-    type: "resize",
-    videoId,
-    width,
-    height,
-  });
+  if (cluster.isPrimary) {
+    jobs.enqueue({
+      type: "resize",
+      videoId,
+      width,
+      height,
+    });
+  } else {
+    process.send({
+      messageType: "new-resize",
+      data: {
+        videoId,
+        width,
+        height,
+      },
+    });
+  }
 
   res.status(200).json({
     message: "The video is now being proccessed!",
