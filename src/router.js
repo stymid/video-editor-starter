@@ -39,4 +39,16 @@ module.exports = (server) => {
 
   // Send an audio  /api/video/extract-audio
   server.route("patch", "/api/video/extract-audio", Video.extractAudio);
+
+  // ------------------------------------------------ //
+  // ************ HANDLE FAKE ROUTES ************* //
+  // ------------------------------------------------ //
+
+  server.route(
+    "get",
+    "/.well-known/appspecific/com.chrome.devtools.json",
+    (req, res) => {
+      res.json({ devtools: "ok" });
+    }
+  );
 };
